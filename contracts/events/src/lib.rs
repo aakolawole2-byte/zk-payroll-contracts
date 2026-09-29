@@ -148,6 +148,24 @@ pub fn emit_metadata_bound(e: &Env, run_id: u64, metadata_hash: BytesN<32>) {
     );
 }
 
+/// Emitted when a payroll note hash is pre-committed. Deliberately carries
+/// only the hash, never the note's actual content, the employee it
+/// concerns, or any amount.
+pub fn emit_note_committed(e: &Env, note_hash: BytesN<32>) {
+    e.events().publish(
+        (payroll_topic(), Symbol::new(e, "note_committed")),
+        note_hash,
+    );
+}
+
+/// Emitted when a payroll note hash is bound to a payroll run.
+pub fn emit_note_bound(e: &Env, run_id: u64, note_hash: BytesN<32>) {
+    e.events().publish(
+        (payroll_topic(), Symbol::new(e, "note_bound")),
+        (run_id, note_hash),
+    );
+}
+
 /// Emitted when a draft hash is pre-committed on-chain.
 pub fn emit_draft_committed(e: &Env, draft_hash: BytesN<32>) {
     e.events().publish(

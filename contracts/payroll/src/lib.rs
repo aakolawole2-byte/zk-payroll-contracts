@@ -128,6 +128,11 @@ pub struct PayrollRun {
     pub reconciliation_status: ReconciliationStatus,
     /// Off-chain metadata hash (period, company, batch, commitments) (#177).
     pub metadata_hash: BytesN<32>,
+    /// Hash of an off-chain payroll note (e.g. a payslip or payment receipt
+    /// document issued outside the contract) bound to this run (#617). The
+    /// zero hash indicates no note has been bound yet, the same convention
+    /// `metadata_hash` already uses.
+    pub note_hash: BytesN<32>,
 }
 
 /// Immutable result binding for a client-supplied idempotency key.
@@ -985,6 +990,11 @@ pub enum DataKey {
     DepositNonce(BytesN<32>),
     /// Pre-committed draft hash bound before execution (#102).
     DraftCommitment(BytesN<32>),
+    /// Pre-committed payroll note hash bound before being attached to a run
+    /// (#617). Kept in its own keyspace, separate from `DraftCommitment`,
+    /// so a note hash can never be mistaken for, or collide in storage
+    /// with, an unrelated draft or metadata commitment.
+    NoteCommitment(BytesN<32>),
     /// Pending emergency withdrawal request (#104).
     EmergencyRequest,
     /// Accumulated deposit balance per depositor address (#62).
@@ -3770,6 +3780,7 @@ impl Payroll {
             nonce: pending_run.nonce.clone(),
             reconciliation_status: ReconciliationStatus::Unreconciled,
             metadata_hash: BytesN::from_array(&e, &[0u8; 32]),
+            note_hash: BytesN::from_array(&e, &[0u8; 32]),
         };
         e.storage()
             .persistent()
@@ -4174,6 +4185,7 @@ impl Payroll {
             nonce: nonce.clone(),
             reconciliation_status: ReconciliationStatus::Unreconciled,
             metadata_hash: BytesN::from_array(&e, &[0u8; 32]),
+            note_hash: BytesN::from_array(&e, &[0u8; 32]),
         };
         e.storage()
             .persistent()
@@ -4394,6 +4406,7 @@ impl Payroll {
             nonce: nonce.clone(),
             reconciliation_status: ReconciliationStatus::Unreconciled,
             metadata_hash: BytesN::from_array(&e, &[0u8; 32]),
+            note_hash: BytesN::from_array(&e, &[0u8; 32]),
         };
         e.storage()
             .persistent()
@@ -6049,6 +6062,119 @@ impl Payroll {
             .get(&DataKey::PayrollRun(run_id))
             .expect("Run not found");
         run.metadata_hash == expected_hash
+    }
+
+    // ?? Issue #617: payroll note hash verification ??????????????????????????
+
+    /// Pre-commit an off-chain payroll note hash (e.g. a payslip or payment
+    /// receipt document issued to an employee outside the contract) that
+    /// will later be bound to a payroll run.
+    ///
+    /// Same one-time-use commit-then-bind pattern already used for
+    /// `metadata_hash` (#177) and `draft_hash` (#102): the hash is recorded
+    /// here first, then consumed by `set_run_note_hash`. Kept in its own
+    /// `NoteCommitment` keyspace rather than reusing `DraftCommitment`, so a
+    /// note hash can never be mistaken for, or collide in storage with, an
+    /// unrelated draft or metadata commitment.
+    ///
+    /// Only the admin may call.
+    pub fn commit_payroll_note_hash(e: Env, admin: Address, note_hash: BytesN<32>) {
+        Self::require_not_paused(&e);
+        Self::validate_non_zero_digest(&e, &note_hash, "note_hash");
+        let addrs: ContractAddresses = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Addresses)
+            .expect("Not initialized");
+        if admin != addrs.admin {
+            panic!("Unauthorized");
+        }
+        admin.require_auth();
+
+        let key = DataKey::NoteCommitment(note_hash.clone());
+        if e.storage().persistent().has(&key) {
+            panic!("Note hash already committed");
+        }
+        e.storage().persistent().set(&key, &true);
+
+        payroll_events::emit_note_committed(&e, note_hash);
+    }
+
+    /// Bind a pre-committed payroll note hash to an existing payroll run.
+    /// Consumes the commitment so it cannot be reused. Only the admin may
+    /// call.
+    ///
+    /// Must be called with a note hash that was previously committed via
+    /// `commit_payroll_note_hash`. Fails if the hash has not been
+    /// pre-committed, mirroring `set_run_metadata`'s behavior for
+    /// `metadata_hash`.
+    pub fn set_run_note_hash(e: Env, admin: Address, run_id: u64, note_hash: BytesN<32>) {
+        Self::require_not_paused(&e);
+        Self::validate_run_id(run_id);
+        Self::validate_non_zero_digest(&e, &note_hash, "note_hash");
+        let addrs: ContractAddresses = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Addresses)
+            .expect("Not initialized");
+        if admin != addrs.admin {
+            panic!("Unauthorized");
+        }
+        admin.require_auth();
+
+        let commit_key = DataKey::NoteCommitment(note_hash.clone());
+        if !e.storage().persistent().has(&commit_key) {
+            panic!("Note hash not pre-committed: call commit_payroll_note_hash first");
+        }
+        e.storage().persistent().remove(&commit_key);
+
+        let run_key = DataKey::PayrollRun(run_id);
+        let mut run: PayrollRun = e
+            .storage()
+            .persistent()
+            .get(&run_key)
+            .expect("Run not found");
+        run.note_hash = note_hash.clone();
+        e.storage().persistent().set(&run_key, &run);
+
+        payroll_events::emit_note_bound(&e, run_id, note_hash);
+    }
+
+    /// Return the payroll note hash bound to a completed payroll run.
+    ///
+    /// Returns the raw `BytesN<32>` stored in the run record. The zero hash
+    /// indicates no note has been bound yet.
+    pub fn get_payroll_note_hash(e: Env, run_id: u64) -> BytesN<32> {
+        Self::validate_run_id(run_id);
+        let run: PayrollRun = e
+            .storage()
+            .persistent()
+            .get(&DataKey::PayrollRun(run_id))
+            .expect("Run not found");
+        run.note_hash
+    }
+
+    /// Verify that the payroll note hash stored on-chain for a payroll run
+    /// matches the expected value.
+    ///
+    /// Read-only: retrieves `note_hash` from the completed `PayrollRun`
+    /// record and compares it byte-for-byte against `expected_hash`.
+    /// Returns `true` if they match, `false` otherwise (including when no
+    /// note has been bound yet, since the stored value is then the zero
+    /// hash, which a real note content hash should never equal).
+    ///
+    /// Use case: an employee or auditor holding the off-chain note document
+    /// can hash it locally and call this to confirm it is the exact
+    /// document the payroll admin committed on-chain for this run, without
+    /// the note's actual content ever being exposed on-chain.
+    pub fn verify_payroll_note_hash(e: Env, run_id: u64, expected_hash: BytesN<32>) -> bool {
+        Self::validate_run_id(run_id);
+        let run: PayrollRun = e
+            .storage()
+            .persistent()
+            .get(&DataKey::PayrollRun(run_id))
+            .expect("Run not found");
+        run.note_hash == expected_hash
     }
 
     // ?? Issue #147: company state management ?????????????????????????????????
