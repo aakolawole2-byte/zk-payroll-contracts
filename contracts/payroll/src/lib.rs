@@ -24,6 +24,9 @@ use signed_operator_actions::{
 pub mod execution_authorization;
 use execution_authorization::ExecutionInitiatorAuthorization;
 
+pub mod import_source;
+use import_source::{require_authorized_source, validate_source_for_report};
+
 const MAX_BATCH: u32 = 50;
 const MAX_DRAFT_DESCRIPTION_BYTES: u32 = 256;
 
@@ -797,6 +800,15 @@ pub enum FundingSourceBlocker {
     TokenUnavailable = 3,
     /// Unreserved treasury funds do not cover the requested amount.
     InsufficientFunds = 4,
+    /// The source is ready: no blocker applies.
+    ///
+    /// A sentinel rather than wrapping this enum in `Option` in
+    /// [`FundingSourceReadiness`]: soroban-sdk's `#[repr(u32)]` enum codegen
+    /// only implements the fallible `TryInto<ScVal>` direction, not the
+    /// infallible `Into<ScVal>` that `#[contracttype]`'s `Option<T>` field
+    /// support requires, so `Option<FundingSourceBlocker>` does not compile
+    /// as a struct field.
+    NotBlocked = 5,
 }
 
 /// Read-only readiness result for the configured payroll funding source.
@@ -807,7 +819,8 @@ pub enum FundingSourceBlocker {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FundingSourceReadiness {
     pub ready: bool,
-    pub blocker: Option<FundingSourceBlocker>,
+    /// [`FundingSourceBlocker::NotBlocked`] when `ready` is true.
+    pub blocker: FundingSourceBlocker,
     pub required_amount: i128,
     /// `None` when the source is not initialized, allowlisted, or queryable.
     pub available_balance: Option<i128>,
@@ -3935,6 +3948,7 @@ impl Payroll {
         expected_total_spend: i128,
         nonce: BytesN<32>,
         draft_hash: Option<BytesN<32>>,
+        source_address: Address,
     ) -> u64 {
         // Issue #620: authorize the execution initiator before any other work.
         Self::require_execution_initiator(&e);
@@ -3973,6 +3987,7 @@ impl Payroll {
             expected_total_spend,
             nonce,
             draft_hash,
+            source_address,
         );
         e.storage().persistent().set(
             &key,
@@ -8241,7 +8256,7 @@ impl Payroll {
     ) -> FundingSourceReadiness {
         let blocked = |blocker, available_balance| FundingSourceReadiness {
             ready: false,
-            blocker: Some(blocker),
+            blocker,
             required_amount,
             available_balance,
         };
@@ -8264,8 +8279,8 @@ impl Payroll {
 
         let token_client = soroban_token::Client::new(&e, &addrs.token);
         let total_balance = match token_client.try_balance(&addrs.treasury) {
-            Ok(balance) => balance,
-            Err(_) => return blocked(FundingSourceBlocker::TokenUnavailable, None),
+            Ok(Ok(balance)) => balance,
+            _ => return blocked(FundingSourceBlocker::TokenUnavailable, None),
         };
         let reserved_balance = Self::get_locked_funds(e, addrs.token);
         let available_balance = total_balance.saturating_sub(reserved_balance);
@@ -8279,7 +8294,7 @@ impl Payroll {
 
         FundingSourceReadiness {
             ready: true,
-            blocker: None,
+            blocker: FundingSourceBlocker::NotBlocked,
             required_amount,
             available_balance: Some(available_balance),
         }

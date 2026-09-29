@@ -109,6 +109,7 @@ fn execution_without_initiator_authorization_is_rejected() {
     let env = Env::default();
     let (payroll, _, employee) = common::setup(&env);
     let (proofs, amounts, employees) = common::one_payment(&env, &employee);
+    let source = common::authorized_source(&env, &payroll);
 
     // No execution initiator has authorized this call.
     env.mock_auths(&[]);
@@ -119,6 +120,7 @@ fn execution_without_initiator_authorization_is_rejected() {
         &100,
         &common::nonce(&env, 21),
         &None,
+        &source,
     );
 
     assert!(result.is_err(), "an execution must be rejected when its initiator is not authorized");

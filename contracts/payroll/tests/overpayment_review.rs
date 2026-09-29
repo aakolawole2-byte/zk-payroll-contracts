@@ -70,6 +70,7 @@ struct Ctx {
     payroll_id: Address,
     token_id: Address,
     commitment_id: Address,
+    import_source: Address,
 }
 
 impl Ctx {
@@ -124,6 +125,9 @@ fn setup() -> Ctx {
     token.mint(&treasury, &1_000_000i128);
     commitment.store_commitment(&employee, &BytesN::from_array(&env, &[0u8; 32]));
 
+    let import_source = Address::generate(&env);
+    payroll.register_import_source(&import_source, &0u32);
+
     Ctx {
         env,
         admin,
@@ -132,6 +136,7 @@ fn setup() -> Ctx {
         payroll_id,
         token_id,
         commitment_id,
+        import_source,
     }
 }
 
@@ -157,6 +162,7 @@ fn run_payroll(ctx: &Ctx, nonce_seed: u8) -> u64 {
         &1_000i128,
         &test_nonce(&ctx.env, nonce_seed),
         &None,
+        &ctx.import_source,
     )
 }
 

@@ -77,6 +77,7 @@ struct Ctx {
     registry_client: PayrollRegistryClient<'static>,
     commitment_client: SalaryCommitmentContractClient<'static>,
     payroll_id: Address,
+    import_source: Address,
 }
 
 impl Ctx {
@@ -123,6 +124,9 @@ fn setup() -> Ctx {
 
     let company_id = registry_client.register_company(&admin, &treasury);
 
+    let import_source = Address::generate(&env);
+    payroll_client.register_import_source(&import_source, &0u32);
+
     Ctx {
         env,
         admin,
@@ -133,6 +137,7 @@ fn setup() -> Ctx {
         registry_client,
         commitment_client,
         payroll_id,
+        import_source,
     }
 }
 
@@ -162,6 +167,7 @@ fn execute_one_payment_run(ctx: &Ctx, seed: u8) -> u64 {
         &payment_amount,
         &test_nonce(&ctx.env, seed),
         &None,
+        &ctx.import_source,
     )
 }
 

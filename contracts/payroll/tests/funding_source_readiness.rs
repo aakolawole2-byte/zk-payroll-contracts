@@ -15,7 +15,7 @@ fn configured_funded_source_is_ready_for_exact_available_amount() {
 
     let result = client.check_funding_source_readiness(&1_000_000);
     assert!(result.ready);
-    assert_eq!(result.blocker, None);
+    assert_eq!(result.blocker, FundingSourceBlocker::NotBlocked);
     assert_eq!(result.required_amount, 1_000_000);
     assert_eq!(result.available_balance, Some(1_000_000));
 }
@@ -27,7 +27,7 @@ fn insufficient_funds_returns_available_balance_and_blocker() {
 
     let result = client.check_funding_source_readiness(&1_000_001);
     assert!(!result.ready);
-    assert_eq!(result.blocker, Some(FundingSourceBlocker::InsufficientFunds));
+    assert_eq!(result.blocker, FundingSourceBlocker::InsufficientFunds);
     assert_eq!(result.available_balance, Some(1_000_000));
 }
 
@@ -47,7 +47,7 @@ fn readiness_uses_balance_after_pending_run_reservations() {
 
     let result = client.check_funding_source_readiness(&1_000_000);
     assert!(!result.ready);
-    assert_eq!(result.blocker, Some(FundingSourceBlocker::InsufficientFunds));
+    assert_eq!(result.blocker, FundingSourceBlocker::InsufficientFunds);
     assert_eq!(result.available_balance, Some(999_900));
 }
 
@@ -59,10 +59,7 @@ fn non_positive_required_amount_is_rejected() {
     for amount in [0, -1] {
         let result = client.check_funding_source_readiness(&amount);
         assert!(!result.ready);
-        assert_eq!(
-            result.blocker,
-            Some(FundingSourceBlocker::InvalidRequiredAmount)
-        );
+        assert_eq!(result.blocker, FundingSourceBlocker::InvalidRequiredAmount);
         assert_eq!(result.available_balance, None);
     }
 }
@@ -75,7 +72,7 @@ fn uninitialized_payroll_reports_missing_funding_configuration() {
 
     let result = client.check_funding_source_readiness(&100);
     assert!(!result.ready);
-    assert_eq!(result.blocker, Some(FundingSourceBlocker::NotInitialized));
+    assert_eq!(result.blocker, FundingSourceBlocker::NotInitialized);
     assert_eq!(result.available_balance, None);
 }
 
@@ -87,7 +84,7 @@ fn deactivated_asset_is_reported_without_reading_balance() {
 
     let result = client.check_funding_source_readiness(&100);
     assert!(!result.ready);
-    assert_eq!(result.blocker, Some(FundingSourceBlocker::AssetNotAllowed));
+    assert_eq!(result.blocker, FundingSourceBlocker::AssetNotAllowed);
     assert_eq!(result.available_balance, None);
 }
 
@@ -111,7 +108,7 @@ fn unavailable_token_contract_is_reported_cleanly() {
 
     let result = client.check_funding_source_readiness(&100);
     assert!(!result.ready);
-    assert_eq!(result.blocker, Some(FundingSourceBlocker::TokenUnavailable));
+    assert_eq!(result.blocker, FundingSourceBlocker::TokenUnavailable);
     assert_eq!(result.available_balance, None);
 }
 

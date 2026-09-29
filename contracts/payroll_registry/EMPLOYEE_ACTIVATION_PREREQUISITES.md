@@ -56,14 +56,14 @@ Validation occurs in `set_employee_status` function in `payroll_registry/src/lib
 ```rust
 // Guard: only validate when transitioning TO Active
 if status == EmployeeStatus::Active && previous_status != EmployeeStatus::Active {
-    Self::validate_activation_prerequisites(&env, company_id, &employee);
+    Self::validate_activation_prereqs(&env, company_id, &employee);
 }
 ```
 
 ### Validation Function
 
 ```rust
-fn validate_activation_prerequisites(env: &Env, company_id: u64, employee: &Address) {
+fn validate_activation_prereqs(env: &Env, company_id: u64, employee: &Address) {
     // Verify commitment exists and is retrievable
     if !env.storage().persistent().has(&DataKey::Employee(company_id, employee.clone())) {
         panic!("Employee commitment not found: cannot activate without commitment registration");
@@ -250,7 +250,7 @@ pub fn set_employee_status(
 
 **Authorization**: Requires company admin authentication
 
-### `validate_activation_prerequisites`
+### `validate_activation_prereqs`
 
 Internal function that checks:
 - Employee commitment is registered in the registry

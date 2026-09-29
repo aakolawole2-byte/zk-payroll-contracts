@@ -20,7 +20,7 @@
 //! but the error never exposes which sources are authorized or what the
 //! payroll data contains.
 
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, String, Symbol};
 
 use crate::{DataKey, PayrollFailureReason};
 
@@ -82,8 +82,11 @@ pub fn register_source(
     addresses.admin.require_auth();
 
     // Reject zero address
-    let zero = Address::from_contract_id(env, &soroban_sdk::BytesN::from_array(env, &[0u8; 32]));
-    if source_address == zero {
+    let zero_wallet = String::from_str(
+        env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    );
+    if source_address == Address::from_string(&zero_wallet) {
         panic!("Import source cannot be the zero address");
     }
 
@@ -99,7 +102,7 @@ pub fn register_source(
         .set(&DataKey::ImportSource(source_address.clone()), &source);
 
     env.events().publish(
-        (symbol_short!("payroll"), symbol_short!("source_reg")),
+        (symbol_short!("payroll"), symbol_short!("src_reg")),
         (),
     );
 }
@@ -137,7 +140,7 @@ pub fn deactivate_source(env: &Env, source_address: Address) {
     env.storage().persistent().set(&source_key, &source);
 
     env.events().publish(
-        (symbol_short!("payroll"), symbol_short!("source_deact")),
+        (symbol_short!("payroll"), symbol_short!("src_deact")),
         (),
     );
 }
